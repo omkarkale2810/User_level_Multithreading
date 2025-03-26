@@ -1,10 +1,3 @@
-/*
- * User-level One-to-One Threading Library
- * 
- * This library implements a user-level threading system where each user thread
- * maps to one kernel thread (one-to-one model).
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <ucontext.h>
@@ -14,46 +7,33 @@
 #include <sys/time.h>
 #include <pthread.h>
 
-/* Thread States */
 #define THREAD_READY    0
 #define THREAD_RUNNING  1
 #define THREAD_BLOCKED  2
 #define THREAD_FINISHED 3
 
-/* Thread Stack Size */
-#define STACK_SIZE (64 * 1024)  /* 64KB stack */
+#define STACK_SIZE (64 * 1024) 
 
-/* Maximum number of threads */
 #define MAX_THREADS 128
 
-/* Thread Control Block */
 typedef struct {
-    pthread_t kernel_tid;       /* Kernel thread ID */
-    ucontext_t context;         /* Thread context */
-    void *stack;                /* Thread stack */
-    int state;                  /* Thread state */
-    int thread_id;              /* User-level thread ID */
-    void *(*start_routine)(void *); /* Thread start function */
-    void *arg;                  /* Argument to start function */
-    void *return_value;         /* Return value from thread */
-    int joined_by;              /* ID of thread waiting for this thread */
+    pthread_t kernel_tid;       
+    ucontext_t context;         
+    void *stack;                
+    int state;                  
+    int thread_id;              
+    void *(*start_routine)(void *); 
+    void *arg;                  
+    void *return_value;         
+    int joined_by;              
 } thread_t;
 
-/* Thread table to keep track of all threads */
 static thread_t thread_table[MAX_THREADS];
-
-/* Number of active threads */
 static int thread_count = 0;
-
-/* Current running thread ID */
 static int current_thread = -1;
-
-/* Next available thread ID */
 static int next_thread_id = 0;
 
-/* Initialize the threading library */
 void thread_init(void) {
-    /* Initialize the main thread (thread 0) */
     thread_table[0].thread_id = next_thread_id++;
     thread_table[0].state = THREAD_RUNNING;
     thread_table[0].joined_by = -1;
@@ -62,11 +42,8 @@ void thread_init(void) {
     thread_count = 1;
 }
 
-/* Thread wrapper function that calls the actual thread function */
 static void *thread_wrapper(void *arg) {
     thread_t *thread = (thread_t *)arg;
-    
-    /* Execute the thread function */
     thread->return_value = thread->start_routine(thread->arg);
     
     /* Mark thread as finished */
@@ -81,41 +58,33 @@ static void *thread_wrapper(void *arg) {
     return NULL;  /* Never reached */
 }
 
-/* Create a new thread */
 int thread_create(int *thread_id, void *(*start_routine)(void *), void *arg) {
     if (thread_count >= MAX_THREADS) {
-        return -1;  /* Too many threads */
+        return -1;  
     }
-    
-    /* Find an empty slot in the thread table */
     int i;
     for (i = 0; i < MAX_THREADS; i++) {
         if (i != current_thread && thread_table[i].state == THREAD_FINISHED) {
             break;
         }
     }
-    
     if (i == MAX_THREADS) {
-        /* No empty slots found, find the first unused slot */
         for (i = 0; i < MAX_THREADS; i++) {
             if (thread_table[i].thread_id == 0 && i != 0) {
                 break;
             }
         }
     }
-    
     if (i == MAX_THREADS) {
-        return -1;  /* No available slots */
+        return -1;  
     }
     
-    /* Initialize the thread control block */
     thread_table[i].thread_id = next_thread_id++;
     thread_table[i].state = THREAD_READY;
     thread_table[i].start_routine = start_routine;
     thread_table[i].arg = arg;
     thread_table[i].joined_by = -1;
     
-    /* Create the kernel thread (pthread) for one-to-one mapping */
     if (pthread_create(&thread_table[i].kernel_tid, NULL, thread_wrapper, &thread_table[i]) != 0) {
         thread_table[i].thread_id = 0;
         return -1;
@@ -127,73 +96,56 @@ int thread_create(int *thread_id, void *(*start_routine)(void *), void *arg) {
     return 0;
 }
 
-/* Yield execution to another thread */
 void thread_yield(void) {
-    /* In a one-to-one model, we just yield to the kernel scheduler */
     sched_yield();
 }
 
-/* Wait for a thread to finish */
 int thread_join(int thread_id, void **return_value) {
     int i;
-    
-    /* Find the thread with given ID */
     for (i = 0; i < MAX_THREADS; i++) {
         if (thread_table[i].thread_id == thread_id) {
             break;
         }
     }
-    
     if (i == MAX_THREADS) {
-        return -1;  /* Thread not found */
+        return -1;
     }
-    
-    /* If thread already finished, just get its return value */
     if (thread_table[i].state == THREAD_FINISHED) {
         if (return_value != NULL) {
             *return_value = thread_table[i].return_value;
         }
         return 0;
     }
-    
-    /* Mark that we're waiting for this thread */
     thread_table[i].joined_by = current_thread;
-    
-    /* Wait for the thread to complete using pthread_join */
+
     void *temp_retval;
     pthread_join(thread_table[i].kernel_tid, &temp_retval);
     
-    /* Get the return value */
     if (return_value != NULL) {
         *return_value = thread_table[i].return_value;
     }
-    
     return 0;
 }
 
-/* Exit the current thread */
 void thread_exit(void *return_value) {
     if (current_thread >= 0) {
         thread_table[current_thread].return_value = return_value;
         thread_table[current_thread].state = THREAD_FINISHED;
-        
-        /* Wake up any thread waiting for this one to finish */
+
         if (thread_table[current_thread].joined_by >= 0) {
             thread_table[thread_table[current_thread].joined_by].state = THREAD_READY;
         }
         
         thread_count--;
     }
-    
-    pthread_exit(NULL);  /* Exit the kernel thread */
+    pthread_exit(NULL);
 }
 
-/* Get current thread ID */
 int thread_self(void) {
     return (current_thread >= 0) ? thread_table[current_thread].thread_id : -1;
 }
 
-/* ============= Mutex Implementation ============= */
+// mutex implementation
 
 typedef struct {
     pthread_mutex_t mutex;
@@ -233,7 +185,7 @@ int thread_mutex_destroy(thread_mutex_t *mutex) {
     return result;
 }
 
-/* ============= Condition Variable Implementation ============= */
+// Condition Variable Implementation 
 
 typedef struct {
     pthread_cond_t cond;
